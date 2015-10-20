@@ -26,6 +26,7 @@ const {Router} = ReactRouter;
 const url = Npm.require('url');
 const Fiber = Npm.require('fibers');
 const cookieParser = Npm.require('cookie-parser');
+const Cheerio = Npm.require('cheerio');
 
 let webpackStats;
 
@@ -123,9 +124,37 @@ ReactRouterSSR.Run = function(routes, clientOptions, serverOptions) {
       var originalWrite = res.write;
       res.write = function(data) {
         if(typeof data === 'string' && data.indexOf('<!DOCTYPE html>') === 0) {
-          if (!serverOptions.dontMoveScripts) {
-            data = moveScripts(data);
+
+          // translation by cheerio ------------------
+
+          var cheerioFilter = [];
+          if( !serverOptions.dontMoveScripts ){
+            cheerioFilter.push( moveScripts );
           }
+          if( serverOptions.cheerioFilter ){
+            cheerioFilter.push( serverOptions.cheerioFilter );
+          }
+
+          if ( cheerioFilter.length > 0 ) {
+            const $ = Cheerio.load(data, {
+              decodeEntities: false
+            });
+
+            for( var i=0; i<cheerioFilter.length; i++ ){
+              var fn = cheerioFilter[i];
+              fn($, req);
+            }
+
+            data = $.html();
+          }
+
+          // translation by filter -------------------
+
+          if( serverOptions.filter ){
+            data = serverOptions.filter(data);
+          }
+
+          // -----------------------------------------
 
           if (css) {
             data = data.replace('</head>', '<style id="' + (clientOptions.styleCollectorId || 'css-style-collector-data') + '">' + css + '</style></head>');
@@ -167,19 +196,13 @@ ReactRouterSSR.Run = function(routes, clientOptions, serverOptions) {
 
 // Thank you FlowRouter for this wonderful idea :)
 // https://github.com/kadirahq/flow-router/blob/ssr/server/route.js
-const Cheerio = Npm.require('cheerio');
 
-function moveScripts(data) {
-  const $ = Cheerio.load(data, {
-    decodeEntities: false
-  });
+function moveScripts($) {
   const heads = $('head script');
   $('body').append(heads);
 
   // Remove empty lines caused by removing scripts
   $('head').html($('head').html().replace(/(^[ \t]*\n)/gm, ''));
-
-  return $.html();
 }
 
 if (Package.mongo && !Package.autopublish) {
